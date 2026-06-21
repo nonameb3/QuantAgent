@@ -107,8 +107,8 @@ def create_indicator_agent(llm, toolkit):
             if not report_content or (isinstance(report_content, str) and not report_content.strip()):
                 # Check if there's any text content in the messages (skip tool calls)
                 for msg in reversed(messages):
-                    if (hasattr(msg, 'content') and msg.content and 
-                        isinstance(msg.content, str) and msg.content.strip() and 
+                    if (hasattr(msg, 'content') and msg.content and
+                        isinstance(msg.content, str) and msg.content.strip() and
                         not hasattr(msg, 'tool_calls')):
                         report_content = msg.content
                         break
@@ -118,6 +118,22 @@ def create_indicator_agent(llm, toolkit):
         return {
             "messages": messages,
             "indicator_report": report_content if report_content else "Indicator analysis completed.",
+            "agent_errors": state.get("agent_errors") or {},
+            "confidence_scores": state.get("confidence_scores") or {},
+            "signal_valid": state.get("signal_valid", True),
         }
 
-    return indicator_agent_node
+    def indicator_agent_node_safe(state):
+        try:
+            return indicator_agent_node(state)
+        except Exception as exc:
+            errors = dict(state.get("agent_errors") or {})
+            errors["indicator"] = str(exc)
+            return {
+                "indicator_report": "",
+                "agent_errors": errors,
+                "confidence_scores": state.get("confidence_scores") or {},
+                "signal_valid": False,
+            }
+
+    return indicator_agent_node_safe
