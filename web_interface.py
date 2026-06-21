@@ -363,6 +363,9 @@ class WebTradingAnalyzer:
                 "stock_name": asset_name,
                 "pattern_image": p_image["pattern_image"],
                 "trend_image": t_image["trend_image"],
+                "agent_errors": {},
+                "confidence_scores": {},
+                "signal_valid": True,
             }
 
             # Run the trading graph

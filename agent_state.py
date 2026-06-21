@@ -1,4 +1,4 @@
-from typing import Annotated, List, TypedDict
+from typing import Annotated, Dict, List, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage
 
@@ -11,6 +11,17 @@ class IndicatorAgentState(TypedDict):
     ]
     time_frame: Annotated[str, "time period for k line data provided"]
     stock_name: Annotated[dict, "stock name for prompt"]
+
+    # Error tracking and signal validity
+    agent_errors: Annotated[
+        Dict[str, str], "Map of agent name to error message for any failed agents"
+    ]
+    confidence_scores: Annotated[
+        Dict[str, float], "Map of agent name to confidence score (0.0–1.0)"
+    ]
+    signal_valid: Annotated[
+        bool, "False if any upstream agent failed; Decision Agent is skipped when False"
+    ]
 
     # Indicator Agent Tools output values (explicitly added per indicator)
     rsi: Annotated[List[float], "Relative Strength Index values"]

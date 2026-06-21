@@ -204,15 +204,16 @@ class TradingGraph:
                 model=model,
                 temperature=temperature,
                 api_key=api_key,
+                max_retries=3,
+                request_timeout=30,
             )
         elif provider == "anthropic":
-            # ChatAnthropic handles SystemMessage extraction automatically
-            # It extracts SystemMessage from the message list and passes it as 'system' parameter
-            # The messages array should contain at least one non-SystemMessage
             return ChatAnthropic(
                 model=model,
                 temperature=temperature,
                 api_key=api_key,
+                max_retries=3,
+                timeout=30,
             )
         elif provider == "qwen":
             return ChatQwen(

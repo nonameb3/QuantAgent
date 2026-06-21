@@ -164,6 +164,25 @@ def create_trend_agent(tool_llm, graph_llm, toolkit):
                 if trend_image_b64
                 else None
             ),
+            "agent_errors": state.get("agent_errors") or {},
+            "confidence_scores": state.get("confidence_scores") or {},
+            "signal_valid": state.get("signal_valid", True),
         }
 
-    return trend_agent_node
+    def trend_agent_node_safe(state):
+        try:
+            return trend_agent_node(state)
+        except Exception as exc:
+            errors = dict(state.get("agent_errors") or {})
+            errors["trend"] = str(exc)
+            return {
+                "trend_report": "",
+                "trend_image": None,
+                "trend_image_filename": None,
+                "trend_image_description": None,
+                "agent_errors": errors,
+                "confidence_scores": state.get("confidence_scores") or {},
+                "signal_valid": False,
+            }
+
+    return trend_agent_node_safe

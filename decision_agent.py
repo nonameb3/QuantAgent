@@ -3,6 +3,66 @@ Agent for making final trade decisions in high-frequency trading (HFT) context.
 Combines indicator, pattern, and trend reports to issue a LONG or SHORT order.
 """
 
+import json
+import re
+
+
+def _parse_llm_json(raw: str) -> dict:
+    """
+    Extract and parse a JSON object from LLM output.
+    Handles markdown fences (```json ... ```) and trailing commas.
+    Raises ValueError if no valid JSON object is found.
+    """
+    # Strip markdown code fences if present
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+    candidate = fenced.group(1).strip() if fenced else raw.strip()
+
+    # Remove trailing commas before } or ] (common LLM mistake)
+    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+
+    # Try parsing the cleaned candidate first
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    # Fall back: find the first {...} block in the original text
+    brace_match = re.search(r"\{[\s\S]*\}", raw)
+    if brace_match:
+        fallback = re.sub(r",\s*([}\]])", r"\1", brace_match.group(0))
+        try:
+            return json.loads(fallback)
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"No valid JSON object found in LLM output: {raw[:200]!r}")
+
+
+def _validate_decision(data: dict) -> dict:
+    """
+    Validate required fields and normalise values.
+    Returns the validated dict or raises ValueError.
+    """
+    required = {"decision", "justification", "risk_reward_ratio", "forecast_horizon"}
+    missing = required - data.keys()
+    if missing:
+        raise ValueError(f"Missing required fields in decision JSON: {missing}")
+
+    decision = str(data["decision"]).upper().strip()
+    if decision not in {"LONG", "SHORT"}:
+        raise ValueError(f"Invalid decision value: {data['decision']!r}. Must be LONG or SHORT.")
+    data["decision"] = decision
+
+    try:
+        rr = float(data["risk_reward_ratio"])
+    except (TypeError, ValueError):
+        raise ValueError(f"risk_reward_ratio is not numeric: {data['risk_reward_ratio']!r}")
+    if not (1.0 <= rr <= 3.0):
+        raise ValueError(f"risk_reward_ratio {rr} is outside expected range [1.0, 3.0]")
+    data["risk_reward_ratio"] = rr
+
+    return data
+
 
 def create_final_trade_decider(llm):
     """
@@ -11,6 +71,20 @@ def create_final_trade_decider(llm):
     """
 
     def trade_decision_node(state) -> dict:
+        # Gate: skip if any upstream agent failed
+        if not state.get("signal_valid", True):
+            errors = state.get("agent_errors", {})
+            return {
+                "final_trade_decision": json.dumps({
+                    "decision": "SKIPPED",
+                    "justification": f"Signal invalidated by upstream agent errors: {errors}",
+                    "risk_reward_ratio": None,
+                    "forecast_horizon": None,
+                }),
+                "messages": [],
+                "decision_prompt": "",
+            }
+
         indicator_report = state["indicator_report"]
         pattern_report = state["pattern_report"]
         trend_report = state["trend_report"]
@@ -80,22 +154,45 @@ def create_final_trade_decider(llm):
             }}
 
             --------
-            **Technical Indicator Report**  
+            **Technical Indicator Report**
             {indicator_report}
 
-            **Pattern Report**  
+            **Pattern Report**
             {pattern_report}
 
-            **Trend Report**  
+            **Trend Report**
             {trend_report}
 
         """
 
         # --- LLM call for decision ---
         response = llm.invoke(prompt)
+        raw_content = response.content
+
+        # --- Parse and validate JSON output ---
+        agent_errors = dict(state.get("agent_errors") or {})
+        confidence_scores = dict(state.get("confidence_scores") or {})
+
+        try:
+            parsed = _parse_llm_json(raw_content)
+            validated = _validate_decision(parsed)
+            final_decision = json.dumps(validated)
+            confidence_scores["decision"] = 1.0
+        except (ValueError, KeyError) as exc:
+            agent_errors["decision"] = str(exc)
+            final_decision = json.dumps({
+                "decision": "ERROR",
+                "justification": f"Failed to parse LLM output: {exc}",
+                "raw_output": raw_content[:500],
+                "risk_reward_ratio": None,
+                "forecast_horizon": None,
+            })
+            confidence_scores["decision"] = 0.0
 
         return {
-            "final_trade_decision": response.content,
+            "final_trade_decision": final_decision,
+            "agent_errors": agent_errors,
+            "confidence_scores": confidence_scores,
             "messages": [response],
             "decision_prompt": prompt,
         }
