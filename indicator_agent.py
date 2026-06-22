@@ -118,21 +118,17 @@ def create_indicator_agent(llm, toolkit):
         return {
             "messages": messages,
             "indicator_report": report_content if report_content else "Indicator analysis completed.",
-            "agent_errors": state.get("agent_errors") or {},
-            "confidence_scores": state.get("confidence_scores") or {},
-            "signal_valid": state.get("signal_valid", True),
+            "agent_errors": {},
+            "signal_valid": True,
         }
 
     def indicator_agent_node_safe(state):
         try:
             return indicator_agent_node(state)
         except Exception as exc:
-            errors = dict(state.get("agent_errors") or {})
-            errors["indicator"] = str(exc)
             return {
                 "indicator_report": "",
-                "agent_errors": errors,
-                "confidence_scores": state.get("confidence_scores") or {},
+                "agent_errors": {"indicator": str(exc)},
                 "signal_valid": False,
             }
 
