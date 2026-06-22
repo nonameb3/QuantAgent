@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Any, Dict
 
 import pandas as pd
-import yfinance as yf
 from flask import Flask, jsonify, render_template, request, send_file
 from openai import OpenAI
 
 import static_util
+from data_feed import DataFeed, YFinanceFeed
 from trading_graph import TradingGraph
 
 app = Flask(__name__)
@@ -76,13 +76,14 @@ def set_active_provider(provider: str) -> None:
 
 
 class WebTradingAnalyzer:
-    def __init__(self):
+    def __init__(self, feed: DataFeed | None = None):
         """Initialize the web trading analyzer."""
         from default_config import DEFAULT_CONFIG
         # Start with default config (OpenAI)
         self.config = DEFAULT_CONFIG.copy()
         self.trading_graph = TradingGraph(config=self.config)
         self.data_dir = Path("data")
+        self.feed: DataFeed = feed if feed is not None else YFinanceFeed()
 
         # Ensure data dir exists
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -103,32 +104,6 @@ class WebTradingAnalyzer:
             "TSLA": "Tesla Inc.",  # New asset
         }
 
-        # Yahoo Finance symbol mapping
-        self.yfinance_symbols = {
-            "SPX": "^GSPC",  # S&P 500
-            "BTC": "BTC-USD",  # Bitcoin
-            "GC": "GC=F",  # Gold Futures
-            "NQ": "NQ=F",  # Nasdaq Futures
-            "CL": "CL=F",  # Crude Oil
-            "ES": "ES=F",  # E-mini S&P 500
-            "DJI": "^DJI",  # Dow Jones
-            "QQQ": "QQQ",  # Invesco QQQ Trust
-            "VIX": "^VIX",  # Volatility Index
-            "DXY": "DX-Y.NYB",  # US Dollar Index
-        }
-
-        # Yahoo Finance interval mapping
-        self.yfinance_intervals = {
-            "1m": "1m",
-            "5m": "5m",
-            "15m": "15m",
-            "30m": "30m",
-            "1h": "1h",
-            "4h": "4h",  # yfinance supports 4h natively!
-            "1d": "1d",
-            "1w": "1wk",
-            "1mo": "1mo",
-        }
 
         # Load persisted custom assets
         self.custom_assets_file = self.data_dir / "custom_assets.json"
@@ -137,64 +112,10 @@ class WebTradingAnalyzer:
     def fetch_yfinance_data(
         self, symbol: str, interval: str, start_date: str, end_date: str
     ) -> pd.DataFrame:
-        """Fetch OHLCV data from Yahoo Finance."""
-        try:
-            yf_symbol = self.yfinance_symbols.get(symbol, symbol)
-            yf_interval = self.yfinance_intervals.get(interval, interval)
-
-            df = yf.download(
-                tickers=yf_symbol, start=start_date, end=end_date, interval=yf_interval
-            )
-
-            if df is None or df.empty:
-                return pd.DataFrame()
-
-            # Ensure df is a DataFrame, not a Series
-            if isinstance(df, pd.Series):
-                df = df.to_frame()
-
-            # Reset index to ensure we have a clean DataFrame
-            df = df.reset_index()
-
-            # Ensure we have a DataFrame
-            if not isinstance(df, pd.DataFrame):
-                return pd.DataFrame()
-
-            # Handle potential MultiIndex columns
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-
-            # Rename columns if needed
-            column_mapping = {
-                "Date": "Datetime",
-                "Open": "Open",
-                "High": "High",
-                "Low": "Low",
-                "Close": "Close",
-                "Volume": "Volume",
-            }
-
-            # Only rename columns that exist
-            existing_columns = {
-                old: new for old, new in column_mapping.items() if old in df.columns
-            }
-            df = df.rename(columns=existing_columns)
-
-            # Ensure we have the required columns
-            required_columns = ["Datetime", "Open", "High", "Low", "Close"]
-            if not all(col in df.columns for col in required_columns):
-                print(f"Warning: Missing columns. Available: {list(df.columns)}")
-                return pd.DataFrame()
-
-            # Select only the required columns
-            df = df[required_columns]
-            df["Datetime"] = pd.to_datetime(df["Datetime"])
-
-            return df
-
-        except Exception as e:
-            print(f"Error fetching data for {symbol}: {e}")
-            return pd.DataFrame()
+        """Fetch OHLCV data via the configured DataFeed using a date-string range."""
+        start = datetime.fromisoformat(start_date)
+        end = datetime.fromisoformat(end_date)
+        return self.feed.get_klines_by_range(symbol, interval, start, end)
 
     def fetch_yfinance_data_with_datetime(
         self,
@@ -203,78 +124,12 @@ class WebTradingAnalyzer:
         start_datetime: datetime,
         end_datetime: datetime,
     ) -> pd.DataFrame:
-        """Fetch OHLCV data from Yahoo Finance using datetime objects for exact time precision."""
-        try:
-            yf_symbol = self.yfinance_symbols.get(symbol, symbol)
-            yf_interval = self.yfinance_intervals.get(interval, interval)
-
-            print(
-                f"Fetching {yf_symbol} from {start_datetime} to {end_datetime} with interval {yf_interval}"
-            )
-
-            # Use datetime objects directly for yfinance
-            df = yf.download(
-                tickers=yf_symbol,
-                start=start_datetime,
-                end=end_datetime,
-                interval=yf_interval,
-                auto_adjust=True,
-                prepost=False,
-            )
-
-            if df is None or df.empty:
-                print(f"No data returned for {symbol}")
-                return pd.DataFrame()
-
-            # Ensure df is a DataFrame, not a Series
-            if isinstance(df, pd.Series):
-                df = df.to_frame()
-
-            # Reset index to ensure we have a clean DataFrame
-            df = df.reset_index()
-
-            # Ensure we have a DataFrame
-            if not isinstance(df, pd.DataFrame):
-                return pd.DataFrame()
-
-            # Handle potential MultiIndex columns
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-
-            # Rename columns if needed
-            column_mapping = {
-                "Date": "Datetime",
-                "Open": "Open",
-                "High": "High",
-                "Low": "Low",
-                "Close": "Close",
-                "Volume": "Volume",
-            }
-
-            # Only rename columns that exist
-            existing_columns = {
-                old: new for old, new in column_mapping.items() if old in df.columns
-            }
-            df = df.rename(columns=existing_columns)
-
-            # Ensure we have the required columns
-            required_columns = ["Datetime", "Open", "High", "Low", "Close"]
-            if not all(col in df.columns for col in required_columns):
-                print(f"Warning: Missing columns. Available: {list(df.columns)}")
-                return pd.DataFrame()
-
-            # Select only the required columns
-            df = df[required_columns]
-            df["Datetime"] = pd.to_datetime(df["Datetime"])
-
-            print(f"Successfully fetched {len(df)} data points for {symbol}")
-            print(f"Date range: {df['Datetime'].min()} to {df['Datetime'].max()}")
-
-            return df
-
-        except Exception as e:
-            print(f"Error fetching data for {symbol}: {e}")
-            return pd.DataFrame()
+        """Fetch OHLCV data via the configured DataFeed using datetime objects."""
+        print(f"Fetching {symbol} from {start_datetime} to {end_datetime} interval={interval}")
+        df = self.feed.get_klines_by_range(symbol, interval, start_datetime, end_datetime)
+        if not df.empty:
+            print(f"Fetched {len(df)} candles. Range: {df['Datetime'].min()} → {df['Datetime'].max()}")
+        return df
 
     def get_available_assets(self) -> list:
         """Get list of available assets from the asset mapping dictionary."""
