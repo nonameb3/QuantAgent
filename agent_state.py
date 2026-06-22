@@ -1,6 +1,15 @@
+import operator
 from typing import Annotated, Dict, List, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage
+
+
+def _merge_dicts(a: dict, b: dict) -> dict:
+    return {**a, **b}
+
+
+def _and_reduce(a: bool, b: bool) -> bool:
+    return a and b
 
 
 class IndicatorAgentState(TypedDict):
@@ -13,15 +22,10 @@ class IndicatorAgentState(TypedDict):
     stock_name: Annotated[dict, "stock name for prompt"]
 
     # Error tracking and signal validity
-    agent_errors: Annotated[
-        Dict[str, str], "Map of agent name to error message for any failed agents"
-    ]
-    confidence_scores: Annotated[
-        Dict[str, float], "Map of agent name to confidence score (0.0–1.0)"
-    ]
-    signal_valid: Annotated[
-        bool, "False if any upstream agent failed; Decision Agent is skipped when False"
-    ]
+    # These use reducers so parallel agents merge rather than overwrite.
+    agent_errors: Annotated[Dict[str, str], _merge_dicts]
+    confidence_scores: Annotated[Dict[str, float], _merge_dicts]
+    signal_valid: Annotated[bool, _and_reduce]
 
     # Indicator Agent Tools output values (explicitly added per indicator)
     rsi: Annotated[List[float], "Relative Strength Index values"]
@@ -70,7 +74,8 @@ class IndicatorAgentState(TypedDict):
     # Final analysis and messaging context
     analysis_results: Annotated[str, "Computed result of the analysis or decision"]
     messages: Annotated[
-        List[BaseMessage], "List of chat messages used in LLM prompt construction"
+        List[BaseMessage],
+        operator.add,
     ]
     decision_prompt: Annotated[str, "decision prompt for reflection"]
     final_trade_decision: Annotated[

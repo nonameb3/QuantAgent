@@ -170,16 +170,18 @@ def create_final_trade_decider(llm):
         raw_content = response.content
 
         # --- Parse and validate JSON output ---
-        agent_errors = dict(state.get("agent_errors") or {})
-        confidence_scores = dict(state.get("confidence_scores") or {})
-
         try:
             parsed = _parse_llm_json(raw_content)
             validated = _validate_decision(parsed)
             final_decision = json.dumps(validated)
-            confidence_scores["decision"] = 1.0
+            return {
+                "final_trade_decision": final_decision,
+                "confidence_scores": {"decision": 1.0},
+                "agent_errors": {},
+                "messages": [response],
+                "decision_prompt": prompt,
+            }
         except (ValueError, KeyError) as exc:
-            agent_errors["decision"] = str(exc)
             final_decision = json.dumps({
                 "decision": "ERROR",
                 "justification": f"Failed to parse LLM output: {exc}",
@@ -187,14 +189,12 @@ def create_final_trade_decider(llm):
                 "risk_reward_ratio": None,
                 "forecast_horizon": None,
             })
-            confidence_scores["decision"] = 0.0
-
-        return {
-            "final_trade_decision": final_decision,
-            "agent_errors": agent_errors,
-            "confidence_scores": confidence_scores,
-            "messages": [response],
-            "decision_prompt": prompt,
-        }
+            return {
+                "final_trade_decision": final_decision,
+                "confidence_scores": {"decision": 0.0},
+                "agent_errors": {"decision": str(exc)},
+                "messages": [response],
+                "decision_prompt": prompt,
+            }
 
     return trade_decision_node
