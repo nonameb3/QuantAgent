@@ -17,3 +17,5 @@ anthropic
 ipython
 Pillow
 requests
+APScheduler
+python-dotenv
