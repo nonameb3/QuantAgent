@@ -180,21 +180,17 @@ def create_pattern_agent(tool_llm, graph_llm, toolkit):
         return {
             "messages": messages + [final_response],
             "pattern_report": final_response.content,
-            "agent_errors": state.get("agent_errors") or {},
-            "confidence_scores": state.get("confidence_scores") or {},
-            "signal_valid": state.get("signal_valid", True),
+            "agent_errors": {},
+            "signal_valid": True,
         }
 
     def pattern_agent_node_safe(state):
         try:
             return pattern_agent_node(state)
         except Exception as exc:
-            errors = dict(state.get("agent_errors") or {})
-            errors["pattern"] = str(exc)
             return {
                 "pattern_report": "",
-                "agent_errors": errors,
-                "confidence_scores": state.get("confidence_scores") or {},
+                "agent_errors": {"pattern": str(exc)},
                 "signal_valid": False,
             }
 
